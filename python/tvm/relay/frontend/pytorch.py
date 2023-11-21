@@ -22,8 +22,9 @@
 import functools
 import itertools
 import math
-import re
+import re 
 import sys
+import numpy
 
 import numpy as np
 import tvm
@@ -4128,7 +4129,7 @@ class PyTorchOpConverter:
             "prim::Loop",
         ]
         known_ops += list(self.convert_map.keys())
-        known_ops += list(qnn_torch.convert_map.keys())
+        known_ops += list(qnn_torch.convert_map.keys()) # qnn_torch Functions to convert quantized torch models to QNN
 
         missing = []
 
@@ -4297,6 +4298,12 @@ class PyTorchOpConverter:
         return [_expr.TupleGetItem(loop_val, i + 1) for i in range(num_loop_var)]
 
     def convert_operators(self, operators, outputs, ret_names):
+        '''
+        operators: A list of PyTorch IR (Intermediate Representation) operators.
+        outputs: A dictionary containing the intermediate results of the conversion.
+        ret_names: A list of names corresponding to the outputs that need to be returned.
+        '''
+
         """Convert each Torch IR operators to Relay equivalent"""
         for node_name, op_node in operators:
             operator = op_node.kind()
@@ -4305,6 +4312,7 @@ class PyTorchOpConverter:
             # for operators needed to be taken care with (e.g. nms / arange ...)
             self.current_op.append(op_node)
 
+            '''疑问'''
             if operator == "prim::Constant":
                 outputs[node_name] = _get_constant(op_node)
             elif operator == "prim::ListConstruct" and _should_construct_dynamic_list(op_node):
@@ -4586,7 +4594,7 @@ def _redirect_inplace_output(graph):
                     slice_and_select_nodes.append(src_node)
                 else:
                     break
-            if src_node.kind() == "prim::Param":
+            if src_node.kind() == "prim::Param":#prim::Param 节点表示一个参数
                 # First one is "self"
                 src_value = list(src_node.outputs())[1]
             else:
@@ -4596,11 +4604,17 @@ def _redirect_inplace_output(graph):
 
 def _get_tensor_and_var(torch_tensor, name):
     tensor = tvm.nd.array(torch_tensor.cpu().numpy())
+    '''
+    _expr --> .py: The expression nodes of Relay
+    _expr.Var --> class: A local variable in Relay.
+    _expr.var --> def :Create a new tvm.relay.Var.
+    '''
     var = _expr.var(name, shape=tensor.shape, dtype=tensor.dtype)
     return tensor, var
 
 
 def _get_output_name(node):
+    '''outputsSize()" returns the number of outputs produced by that operation.'''
     assert node.outputsSize() == 1
     return node.output().debugName()
 
@@ -4748,8 +4762,9 @@ def _debug_rename(graph, use_parser_friendly_name):
         for node in nodes:
             if node.outputsSize() == 0:
                 continue
-            if node.kind() in prim_with_blocks:
+            if node.kind() in prim_with_blocks: 
                 for block in node.blocks():
+                    '''In PyTorch's TorchScript, a graph node can represent a block, and blocks are often used to represent control flow structures like loops and conditionals. '''
                     _traverse_graph(block.nodes())
             _rename_outputs(node, source_map, op_type_dict, use_parser_friendly_name)
 
@@ -4819,6 +4834,7 @@ def _get_relay_input_vars(graph, input_infos, prelude, is_module=True, default_d
             pt_dtype = pt_type.scalarType()
             if not pt_dtype and itype:
                 pt_dtype = itype
+            '''converts the PyTorch scalar type input_type to a TVM dtype.'''
             dtype = _convert_data_type(pt_dtype, default_dtype=default_dtype)
             return TensorType(ishape, dtype)
         elif pt_type.kind() == "TupleType":
@@ -4948,6 +4964,14 @@ def convert_params(graph, state_dict, source_map, use_parser_friendly_name=False
     Return Relay vars and TVM NDArrays for input parameters
     A chain of prim::GetAttr nodes is processed one at a time
     """
+    '''
+    graph : 模型计算图
+    state_dict : 模型参数
+    source_map :重命名模型参数的参考
+    getattr_nodes: 图中的计算节点，prim::GetAttr 是 PyTorch 中的一个运算节点（operation node），表示获取对象的属性（attribute）。在 PyTorch 的图中，prim::GetAttr 节点通常用于访问模型或模块中的属性，例如权重、偏置等。
+    疑问
+    '''
+    #  returns a list of nodes in the graph that match the specified kind, 
     getattr_nodes = graph.findAllNodes("prim::GetAttr", recurse=True)
     params = {}
     param_tensors = {}
@@ -4972,7 +4996,7 @@ def convert_params(graph, state_dict, source_map, use_parser_friendly_name=False
                 [source_map[_get_users(getattrs[-1])[0]], full_attr.split(attr_name_sep)[-1]]
             )
 
-            if full_attr.endswith("_packed_params"):  # for quantized models
+            if full_attr.endswith("_packed_params"):   # for quantized models，检查属性名是否以 "_packed_params" 结尾，如果是，表示这是一个量化模型的参数。
                 packed_param_map[full_attr_node_name] = full_attr
             elif full_attr in state_dict:
                 if var_name in vars_by_name:
@@ -5023,6 +5047,32 @@ def from_pytorch(
     keep_quantized_weight=False,
     export_renamed_c_graph_path=None,
 ):
+    
+    '''
+    TorchScript 是 PyTorch 的一种脚本化（scripting）语言，允许用户将 PyTorch 模型转化为一种可保存和加载的中间表示。通过 TorchScript，用户可以将 PyTorch 模型导出为一个脚本，而不仅仅是一个 Python 函数。这种导出的模型可以在没有 Python 解释器的环境中运行，也可以在不依赖 PyTorch 的环境中使用。通常，这是通过 torch.jit.trace 函数进行的，该函数接受一个 PyTorch 模型和示例输入，并生成一个 TorchScripted 模型。
+
+    主要逻辑：
+        使用 PyTorch 的 JIT 编译器（JIT compiler）提取 TorchScript 图。
+        执行一系列 JIT pass，包括 inline pass 和 lower_all_tuples pass。
+            inline Pass（内联优化）：内联函数是一种编程语言特性，它指的是在调用函数的地方直接将函数的代码插入，而不是通过跳转到函数的地址执行
+                目的： inline pass 负责内联函数调用。内联涉及用被调用函数的实际代码替换函数调用，从而消除函数调用本身的开销。
+                工作原理： 在应用于PyTorch模型的IR时，inline pass 寻找函数调用并用被调用函数的实际代码替换它们。这可以通过减少函数调用开销来实现更高效的代码执行。
+            lower_all_tuples Pass（降低所有元组）：
+                目的： lower_all_tuples pass 旨在将IR中的所有元组类型降低为它们的等效表示。在处理大量使用元组类型的模型时，这一 pass 尤为重要。
+                工作原理： 元组是一种高级抽象，可能需要降低为更具体的表示形式，以便在后续编译阶段更好地进行优化。lower_all_tuples pass 将元组类型转换为更基本的表示形式，以便在后续的编译阶段更好地进行优化。
+        进行一些后处理，包括修改 inplace 操作的输出和检查 custom_convert_map。
+        创建 PyTorchOpConverter 对象，用于操作转换。
+        获取所有操作的名称，报告未实现的操作。
+        获取模型的参数（state_dict）。
+        从 PyTorch 图中提取输入变量信息，并创建对应的 Relay 输入变量。
+        对量化模型进行特殊处理，包括获取量化参数和添加量化参数到输出。
+        使用 PyTorchOpConverter 进行操作转换，得到 Relay 中的输出。
+        构建 Relay 函数，将数据输入和参数分开。
+        最后，导出 C 图（如果指定了路径）。
+    '''
+
+
+
     """Load PyTorch model in the form of a scripted PyTorch model and convert into relay.
     The companion parameters will be handled automatically.
 
@@ -5031,6 +5081,7 @@ def from_pytorch(
     script_module : TopLevelTracedModule object
         TorchScripted PyTorch graph
         Note: We currently only support traces (ie: torch.jit.trace(model, input))
+        p.s.:Tracing involves recording the operations performed by the model during a forward pass using example inputs. This trace can then be used to convert the PyTorch model into an equivalent representation in TVM Rela
 
     input_infos : List of tuples
         Can be (input name, input shape) or (input name, (input shape, input types))
@@ -5044,6 +5095,7 @@ def from_pytorch(
 
     custom_convert_map : Dictionary of str to Relay op
         A custom op conversion map in the same format as _convert_map above
+        p.s.:is a dictionary that specifies a custom mapping between operators in the original framework (such as TensorFlow or PyTorch) and their corresponding representations in Relay,
 
     default_type : str
         The default dtype to use when type information is not provided by PyTorch.
@@ -5078,12 +5130,15 @@ def from_pytorch(
         Dict of converted parameters stored in tvm.runtime.ndarray format
     """
     import torch
-
-    mod = tvm.IRModule()
+    #IRModule is the basic unit for all IR transformations across the stack. a container for functions and other IR-related entities
+    mod = tvm.IRModule() 
+    # typically used for adding standard and common functions to an IRModule
+    # prelude是一个IRModule，它包含了一些预定义的函数和类型，为编译和优化提供了基础。
+    # 在PyTorch的TVM前端中，prelude通常用于创建和初始化一些基础的Relay函数和类型，以便在将PyTorch模型转换为Relay表示时使用
     prelude = Prelude(mod)
     enable_lower_all_tuples = True
 
-    converter = PyTorchOpConverter(prelude, default_dtype, use_parser_friendly_name)
+    converter = PyTorchOpConverter(prelude, default_dtype, use_parser_friendly_name) #A helper class for holding PyTorch op converters
 
     graph = script_module.graph.copy()
 
@@ -5101,10 +5156,19 @@ def from_pytorch(
         converter.update_convert_map(custom_convert_map)
 
     op_names = get_all_op_names(graph)
-    converter.report_missing_conversion(op_names)
+    converter.report_missing_conversion(op_names) # 检查输入的模型是否有不匹配的算子，
 
     is_module = isinstance(script_module, torch.jit.ScriptModule)
     params = script_module.state_dict() if is_module else {}
+    # 从 PyTorch 图中提取输入变量信息，并为 Relay（TVM 的中间表示）创建对应的输入变量。
+    '''
+    input_infos: 一个包含输入信息的列表，每个元素是一个包含输入名、形状和数据类型的元组。
+    prelude: Relay 的预定义模块
+    is_module: 一个布尔值，指示是否处理的是模块。对于模块，通常会有一个额外的 "self" 输入
+    构建一个字典 input_vars，其中键是 PyTorch 图中的输入变量的名称，值是对应的 Relay 变量。
+    Return Relay vars from input shapes and create entries based on
+    expected graph inputs - to allow translation
+    '''
     outputs = _get_relay_input_vars(
         graph, input_infos, prelude, default_dtype=default_dtype, is_module=is_module
     )
@@ -5115,16 +5179,25 @@ def from_pytorch(
 
     # rename _C.Graph here for constructing meaningful source name of graph nodes
     # by doing so, we could Use source_map as the reference to rename model parameters
-    source_map = _debug_rename(graph, use_parser_friendly_name)
+    '''
+    Returns map between node and source name，--> Rewrite debug name of node outputs with its operator type
+    debugName is a property associated with nodes or tensors in a computation graph, often used for debugging purposes.     
+    '''
+    source_map = _debug_rename(graph, use_parser_friendly_name) 
+    
+    '''Return Relay vars and TVM NDArrays for input parameters'''
     param_vars, tensors, packed_param_map, param_debug_name_map = convert_params(
         graph, params, source_map, use_parser_friendly_name
     )
-
+    '''get params in tvm.ndarray type'''
     tvm_params = {k: tvm.nd.array(v) for k, v in tensors.items()}
 
     outputs.update(param_vars)
 
     # For quantized models
+    '''
+    获取qnn（量化模型）算子的type、name等信息并更新到covert.convert_map中
+    '''
     quantized_ops = set(["aten::quantize_per_tensor", "quantized::linear_dynamic"])
     if len(quantized_ops.intersection(set(op_names))) > 0:
         weight_quant_params = qnn_torch.get_weight_quant_params(
@@ -5142,10 +5215,21 @@ def from_pytorch(
         qnn_torch.add_quant_params(tvm_params, weight_quant_params)
         converter.update_convert_map(qnn_torch.convert_map)
 
+    '''
+    Returns torch IR nodes that need conversion to Relay
+    '''
+    '''
+        converter.source_map: map from graph node to its source name
+        converter.op_type_dict: map from op type to its presenting order
+    '''
     operator_nodes = _get_operator_nodes(
+
         graph.nodes(), converter.source_map, converter.op_type_dict, use_parser_friendly_name
     )
     ret_name = _get_input_names(graph.return_node())
+    '''
+    Convert each Torch IR operators to Relay equivalent : --->将torch的算子变成Relay的操作符
+    '''
     outputs = converter.convert_operators(operator_nodes, outputs, ret_name)
 
     # ListConstruct kept original python list. Convert to tuple.
@@ -5157,6 +5241,9 @@ def from_pytorch(
         ret = outputs[0]
 
     # Separate data inputs and parameters to make sure data inputs come first.
+    '''
+    为什么在Relay格式里面，需要将数据和参数进行区分保证数据先输入
+    '''
     func_args = []
     data_inputs = []
     for arg in _analysis.free_vars(ret):
@@ -5185,3 +5272,17 @@ def from_pytorch(
         export_c_graph(export_renamed_c_graph_path, graph)
 
     return transform.RemoveUnusedFunctions()(mod), tvm_params
+'''
+计算图结构：
+    在 Relay 中，计算图是由一系列 Relay 节点（操作）和 Relay 边（数据流）组成的。每个节点表示一个操作，而每个边表示操作之间的数据流。
+模型参数和输入数据：
+
+    深度学习模型通常有两种类型的输入：模型参数和实际数据。模型参数是在训练过程中学到的，而实际数据是在推理过程中输入的。区分模型参数和实际数据对于模型的正确执行非常重要。在推理期间，模型参数是固定的，而实际数据是变化的。
+输入顺序的重要性：
+    在 Relay 中，为了正确构建计算图，通常希望先将实际数据输入到计算图中，然后再添加模型参数。这确保了在计算图执行期间，输入数据已经准备好，可以传递到模型的各个层次。
+模型初始化：
+
+    模型参数通常需要在模型初始化阶段被加载。通过先输入数据，可以确保计算图中的每个操作都能够正确访问相应的模型参数。
+数据依赖性：
+    计算图的执行顺序通常是根据数据依赖性确定的。将实际数据作为先行输入，有助于确保在执行计算图时，所有的操作都有所需的输入数据。
+'''

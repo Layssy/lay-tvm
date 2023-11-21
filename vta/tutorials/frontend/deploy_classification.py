@@ -169,7 +169,7 @@ with autotvm.tophub.context(target):
     build_start = time.time()
 
     # Start front end compilation
-    mod, params = relay.frontend.from_mxnet(gluon_model, shape_dict)
+    mod, params = relay.frontend.from_mxnet(gluon_model, shape_dict) 
 
     # Update shape and type dictionary
     shape_dict.update({k: v.shape for k, v in params.items()})
