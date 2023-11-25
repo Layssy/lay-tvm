@@ -38,16 +38,8 @@ tensorization in the core) to massage the compute graph for the hardware target.
 #
 # Now return to the python code. Import packages.
 
+
 from __future__ import absolute_import, print_function
-
-import argparse, json, os, requests, sys, time
-from io import BytesIO
-from os.path import join, isfile
-from PIL import Image
-
-from mxnet.gluon.model_zoo import vision
-import numpy as np
-from matplotlib import pyplot as plt
 
 import tvm
 from tvm import te
@@ -60,6 +52,19 @@ import vta
 from vta.testing import simulator
 from vta.top import graph_pack
 
+import argparse, json, os, requests, sys, time
+from io import BytesIO
+from os.path import join, isfile
+from PIL import Image
+
+# from mxnet.gluon.model_zoo import vision
+import numpy as np
+from matplotlib import pyplot as plt
+
+
+
+import torch
+import torchvision.models as models
 
 # Make sure that TVM was compiled with RPC=1
 assert tvm.runtime.enabled("rpc")
@@ -160,20 +165,30 @@ with autotvm.tophub.context(target):
 
     # Populate the shape and data type dictionary for ImageNet classifier input
     dtype_dict = {"data": "float32"}
-    shape_dict = {"data": (env.BATCH, 3, 224, 224)}
+    shape_dict = [('data', (env.BATCH, 3, 224, 224))]
+    # {"data": (env.BATCH, 3, 224, 224)}
+    
+    # print(f'env_BATCH:{env.BATCH}')
+    # 
 
     # Get off the shelf gluon model, and convert to relay
-    gluon_model = vision.get_model(model, pretrained=True)
+    gluon_model = models.resnet18(pretrained=True)
+    # vision.get_model(model, pretrained=True)
 
     # Measure build start time
     build_start = time.time()
 
-    # Start front end compilation
-    mod, params = relay.frontend.from_mxnet(gluon_model, shape_dict) 
+#     # Start front end compilation
+    example_input = torch.rand(env.BATCH, 3, 224, 224)
+    traced_model = torch.jit.trace(gluon_model, example_input)
+    mod, params = relay.frontend.from_pytorch(traced_model, shape_dict)
+    # relay.frontend.from_mxnet(gluon_model, shape_dict) 
 
-    # Update shape and type dictionary
-    shape_dict.update({k: v.shape for k, v in params.items()})
+    # # Update shape and type dictionary
+    input_info= {}
+    input_info.update({k: v.shape for k, v in params.items()})
     dtype_dict.update({k: str(v.dtype) for k, v in params.items()})
+    # print(f'target.device_name:{target.device_name}')
 
     if target.device_name == "vta":
         # Perform quantization in Relay
@@ -181,9 +196,11 @@ with autotvm.tophub.context(target):
         with tvm.transform.PassContext(opt_level=3):
             with relay.quantize.qconfig(global_scale=8.0, skip_conv_layers=[0]):
                 mod = relay.quantize.quantize(mod, params=params)
+                # print(f'quantize_mod:{mod}')
             # Perform graph packing and constant folding for VTA target
             assert env.BLOCK_IN == env.BLOCK_OUT
             # do device annotation if target is intelfocl or sim
+            # print(f'mod["main"]:{mod["main"]}')
             relay_prog = graph_pack(
                 mod["main"],
                 env.BATCH,
@@ -205,6 +222,7 @@ with autotvm.tophub.context(target):
     else:
         if env.TARGET == "intelfocl":
             # multiple targets to run both on cpu and vta
+            # print('nihao2')
             target = {"cpu": env.target_vta_cpu, "ext_dev": target}
         with vta.build_config(
             opt_level=3, disabled_pass={"AlterOpLayout", "tir.CommonSubexprElimTIR"}
@@ -218,91 +236,91 @@ with autotvm.tophub.context(target):
     print(model + " inference graph built in {0:.2f}s!".format(build_time))
 
     # Send the inference library over to the remote RPC server
-    temp = utils.tempdir()
-    lib.export_library(temp.relpath("graphlib.tar"))
-    remote.upload(temp.relpath("graphlib.tar"))
-    lib = remote.load_module("graphlib.tar")
+    # temp = utils.tempdir()
+    # lib.export_library(temp.relpath("graphlib.tar"))
+    # remote.upload(temp.relpath("graphlib.tar"))
+    # lib = remote.load_module("graphlib.tar")
 
-    if env.TARGET == "intelfocl":
-        ctxes = [remote.ext_dev(0), remote.cpu(0)]
-        m = graph_executor.create(graph, lib, ctxes)
-    else:
-        # Graph runtime
-        m = graph_executor.create(graph, lib, ctx)
+    # if env.TARGET == "intelfocl":
+    #     ctxes = [remote.ext_dev(0), remote.cpu(0)]
+    #     m = graph_executor.create(graph, lib, ctxes)
+    # else:
+    #     # Graph runtime
+    #     m = graph_executor.create(graph, lib, ctx)
 
-######################################################################
-# Perform image classification inference
-# --------------------------------------
-# We run classification on an image sample from ImageNet
-# We just need to download the categories files, `synset.txt`
-# and an input test image.
+# ######################################################################
+# # Perform image classification inference
+# # --------------------------------------
+# # We run classification on an image sample from ImageNet
+# # We just need to download the categories files, `synset.txt`
+# # and an input test image.
 
-# Download ImageNet categories
-categ_url = "https://github.com/uwsampl/web-data/raw/main/vta/models/"
-categ_fn = "synset.txt"
-download.download(join(categ_url, categ_fn), categ_fn)
-synset = eval(open(categ_fn).read())
+# # Download ImageNet categories
+# categ_url = "https://github.com/uwsampl/web-data/raw/main/vta/models/"
+# categ_fn = "synset.txt"
+# download.download(join(categ_url, categ_fn), categ_fn)
+# synset = eval(open(categ_fn).read())
 
-# Download test image
-image_url = "https://homes.cs.washington.edu/~moreau/media/vta/cat.jpg"
-image_fn = "cat.png"
-download.download(image_url, image_fn)
+# # Download test image
+# image_url = "https://homes.cs.washington.edu/~moreau/media/vta/cat.jpg"
+# image_fn = "cat.png"
+# download.download(image_url, image_fn)
 
-# Prepare test image for inference
-image = Image.open(image_fn).resize((224, 224))
-plt.imshow(image)
-plt.show()
-image = np.array(image) - np.array([123.0, 117.0, 104.0])
-image /= np.array([58.395, 57.12, 57.375])
-image = image.transpose((2, 0, 1))
-image = image[np.newaxis, :]
-image = np.repeat(image, env.BATCH, axis=0)
+# # Prepare test image for inference
+# image = Image.open(image_fn).resize((224, 224))
+# plt.imshow(image)
+# plt.show()
+# image = np.array(image) - np.array([123.0, 117.0, 104.0])
+# image /= np.array([58.395, 57.12, 57.375])
+# image = image.transpose((2, 0, 1))
+# image = image[np.newaxis, :]
+# image = np.repeat(image, env.BATCH, axis=0)
 
-# Set the network parameters and inputs
-m.set_input(**params)
-m.set_input("data", image)
+# # Set the network parameters and inputs
+# m.set_input(**params)
+# m.set_input("data", image)
 
-# Perform inference and gather execution statistics
-# More on: :py:method:`tvm.runtime.Module.time_evaluator`
-num = 4  # number of times we run module for a single measurement
-rep = 3  # number of measurements (we derive std dev from this)
-timer = m.module.time_evaluator("run", ctx, number=num, repeat=rep)
+# # Perform inference and gather execution statistics
+# # More on: :py:method:`tvm.runtime.Module.time_evaluator`
+# num = 4  # number of times we run module for a single measurement
+# rep = 3  # number of measurements (we derive std dev from this)
+# timer = m.module.time_evaluator("run", ctx, number=num, repeat=rep)
 
-if env.TARGET in ["sim", "tsim"]:
-    simulator.clear_stats()
-    timer()
-    sim_stats = simulator.stats()
-    print("\nExecution statistics:")
-    for k, v in sim_stats.items():
-        # Since we execute the workload many times, we need to normalize stats
-        # Note that there is always one warm up run
-        # Therefore we divide the overall stats by (num * rep + 1)
-        print("\t{:<16}: {:>16}".format(k, v // (num * rep + 1)))
-else:
-    tcost = timer()
-    std = np.std(tcost.results) * 1000
-    mean = tcost.mean * 1000
-    print("\nPerformed inference in %.2fms (std = %.2f) for %d samples" % (mean, std, env.BATCH))
-    print("Average per sample inference time: %.2fms" % (mean / env.BATCH))
+# if env.TARGET in ["sim", "tsim"]:
+#     simulator.clear_stats()
+#     timer()
+#     sim_stats = simulator.stats()
+#     print("\nExecution statistics:")
+#     for k, v in sim_stats.items():
+#         # Since we execute the workload many times, we need to normalize stats
+#         # Note that there is always one warm up run
+#         # Therefore we divide the overall stats by (num * rep + 1)
+#         print("\t{:<16}: {:>16}".format(k, v // (num * rep + 1)))
+# else:
+#     tcost = timer()
+#     std = np.std(tcost.results) * 1000
+#     mean = tcost.mean * 1000
+#     print("\nPerformed inference in %.2fms (std = %.2f) for %d samples" % (mean, std, env.BATCH))
+#     print("Average per sample inference time: %.2fms" % (mean / env.BATCH))
 
-# Get classification results
-tvm_output = m.get_output(0, tvm.nd.empty((env.BATCH, 1000), "float32", remote.cpu(0)))
-for b in range(env.BATCH):
-    top_categories = np.argsort(tvm_output.numpy()[b])
-    # Report top-5 classification results
-    print("\n{} prediction for sample {}".format(model, b))
-    print("\t#1:", synset[top_categories[-1]])
-    print("\t#2:", synset[top_categories[-2]])
-    print("\t#3:", synset[top_categories[-3]])
-    print("\t#4:", synset[top_categories[-4]])
-    print("\t#5:", synset[top_categories[-5]])
-    # This just checks that one of the 5 top categories
-    # is one variety of cat; this is by no means an accurate
-    # assessment of how quantization affects classification
-    # accuracy but is meant to catch changes to the
-    # quantization pass that would accuracy in the CI.
-    cat_detected = False
-    for k in top_categories[-5:]:
-        if "cat" in synset[k]:
-            cat_detected = True
-    assert cat_detected
+# # Get classification results
+# tvm_output = m.get_output(0, tvm.nd.empty((env.BATCH, 1000), "float32", remote.cpu(0)))
+# for b in range(env.BATCH):
+#     top_categories = np.argsort(tvm_output.numpy()[b])
+#     # Report top-5 classification results
+#     print("\n{} prediction for sample {}".format(model, b))
+#     print("\t#1:", synset[top_categories[-1]])
+#     print("\t#2:", synset[top_categories[-2]])
+#     print("\t#3:", synset[top_categories[-3]])
+#     print("\t#4:", synset[top_categories[-4]])
+#     print("\t#5:", synset[top_categories[-5]])
+#     # This just checks that one of the 5 top categories
+#     # is one variety of cat; this is by no means an accurate
+#     # assessment of how quantization affects classification
+#     # accuracy but is meant to catch changes to the
+#     # quantization pass that would accuracy in the CI.
+#     cat_detected = False
+#     for k in top_categories[-5:]:
+#         if "cat" in synset[k]:
+#             cat_detected = True
+#     assert cat_detected
