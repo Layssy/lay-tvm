@@ -25,7 +25,7 @@ from tvm import topi
 from tvm.topi.utils import get_const_tuple
 from tvm.topi.nn.utils import get_pad_tuple
 
-from ..environment import get_env
+from vta.environment import get_env
 
 
 @autotvm.register_topi_compute("conv2d_transpose_packed.vta")

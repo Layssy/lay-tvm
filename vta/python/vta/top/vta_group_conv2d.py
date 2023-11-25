@@ -23,7 +23,7 @@ from tvm import te
 from tvm import autotvm
 from tvm import topi
 
-from ..environment import get_env
+from vta.environment import get_env
 
 
 @autotvm.register_topi_compute("group_conv2d_packed.vta")

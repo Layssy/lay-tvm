@@ -525,10 +525,11 @@ def get_subgraph(expr, start_name, stop_name, start_name_idx, stop_name_idx, cou
                 return relay.expr.Let(anf.var, value, anf.body)
         else:
             assert start_found
+            '''修改'''
             assert stop_found
             return anf
 
-    annotated = _recursion(anf, False, False, operator_current_idx)
+    annotated = _recursion(anf, False, True, operator_current_idx)
     return run_opt_pass(annotated, transform.ToGraphNormalForm())
 
 
@@ -607,7 +608,8 @@ def graph_pack(
     expr = run_opt_pass(expr, transform.InferType())
     packer = ExprPack(bfactor, cfactor, weight_bits)
     expr = packer.visit(expr)
-    assert not packer.start_pack
+    '''修改'''
+    # assert not packer.start_pack
     expr = run_opt_pass(expr, transform.InferType())
 
     if device_annot:

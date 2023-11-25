@@ -23,7 +23,7 @@ from tvm import te
 from tvm import autotvm
 from tvm import topi
 
-from ..environment import get_env
+from vta.environment import get_env
 
 
 def is_packed_layout(layout):

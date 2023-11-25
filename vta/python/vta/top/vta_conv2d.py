@@ -23,8 +23,8 @@ from tvm import te
 from tvm import autotvm
 from tvm import topi
 
-from .utils import is_packed_layout
-from ..environment import get_env
+from vta.top.utils import is_packed_layout
+from vta.environment import get_env
 
 
 @autotvm.register_topi_compute("conv2d_packed.vta")
