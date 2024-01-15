@@ -68,14 +68,14 @@ def schedule_upsampling_packed(cfg, outs, layout=None):
     upsample_res = []
     assert "int" in output.op.input_tensors[0].dtype
     def _traverse(op):
-        print(f'traverse_op:{op}')
+        # print(f'traverse_op:{op}')
         if topi.tag.is_broadcast(op.tag):
             
             if not op.same_as(output.op):
                 if not op.axis:
                     const_ops.append(op)
                 else:
-                    print(f'traverse_op:{op}')
+                    # print(f'traverse_op:{op}')
                     ewise_ops.append(op)
             for tensor in op.input_tensors:
                 if isinstance(tensor.op, tvm.te.PlaceholderOp):
@@ -117,7 +117,7 @@ def schedule_upsampling_packed(cfg, outs, layout=None):
     
     
     data, = upsample_stage.op.input_tensors
-    print(f'data_type:{data}\ntype:{type(data)}')
+    # print(f'data_type:{data}\ntype:{type(data)}')
     # cdata = s.cache_read(data, env.inp_scope, upsample_stage)
     cdata = s.cache_read(data, env.acc_scope, upsample_stage)
     # print(f'data:{type(data)}')
@@ -158,22 +158,22 @@ def schedule_upsampling_packed(cfg, outs, layout=None):
     #     s[tensor].pragma(s[tensor].op.axis[0], env.dma_copy)
 
     x_bo, x_co, x_i, x_j, x_bi, x_ci = s[upsample_stage].op.axis
-    print(f's[upsample_stage_x_bi:{type(x_bi)}]')
+    # print(f's[upsample_stage_x_bi:{type(x_bi)}]')
     # # print(f'cdata:{cdata.op}')
     # s[cdata].compute_at(s[output], store_pt)
     s[cdata].pragma(s[cdata].op.axis[0], env.dma_copy)
     
     # s[upsample_stage].tensorize(x_bi, env.gemm)
-    # s[upsample_stage].unroll(x_i)
-    # s[upsample_stage].unroll(x_j)
+    # s[upsample_stage].unroll(x_j0)
+    # s[upsample_stage].unroll(x_j0)
     
-    print(f's[cdata].op:{s[cdata].op}\ns[cdata].op.input_tensors:{s[cdata].op.input_tensors}\ns[cdata].op.input_tensors.dtype:{s[cdata].op.input_tensors[0].dtype}')
+    # print(f's[cdata].op:{s[cdata].op}\ns[cdata].op.input_tensors:{s[cdata].op.input_tensors}\ns[cdata].op.input_tensors.dtype:{s[cdata].op.input_tensors[0].dtype}')
     
     # print()
     
-    print(f'upsample_stage.op:{upsample_stage.op}\nupsample_stage.op.tensor:{upsample_stage.op.input_tensors}\nupsample_stage.op.tensor.dtype:{upsample_stage.op.input_tensors[0].dtype}')
+    # print(f'upsample_stage.op:{upsample_stage.op}\nupsample_stage.op.tensor:{upsample_stage.op.input_tensors}\nupsample_stage.op.tensor.dtype:{upsample_stage.op.input_tensors[0].dtype}')
     
-    print()
+    # print()
 
     
     # print(f's[output].op:{s[output].op}\ns[output].op.tensor:{s[output].op.input_tensors}\ns[output].op.tensor.dtype:{s[output].op.input_tensors[0].dtype}')
