@@ -131,6 +131,12 @@ def lower(
     if isinstance(inp, PrimFunc):
         return ffi.lower_primfunc(inp, name, simple_mode)
     if isinstance(inp, te.Schedule):
+        # for arg in args:
+        #     print(f'tvm_driver_arg:{arg}')
+        # print(f'tvm_python_tvm_driver_inp:{inp}')
+        # print(f'tvm_driver_binds:{binds}')
+        # print(f'tvm_driver_simple_mode:{simple_mode}')
+        
         return ffi.lower_schedule(inp, args, name, binds, simple_mode)
     raise ValueError(
         f"Expected input to be an IRModule, PrimFunc or te.Schedule, but got {type(inp)}"
@@ -277,7 +283,7 @@ def build(
         target_host = "llvm" if tvm.runtime.enabled("llvm") else "stackvm"
 
     annotated_mods, target_host = Target.canon_target_map_and_host(annotated_mods, target_host)
-
+    # print(f'tvm/python/tvm/driver/build_module.py-281\n annotated_mods:{annotated_mods},\n target_host:{target_host}')
     rt_mod_host = _driver_ffi.tir_to_runtime(annotated_mods, target_host)
 
     annotated_mods, target_host = Target.canon_target_map_and_host(annotated_mods, target_host)

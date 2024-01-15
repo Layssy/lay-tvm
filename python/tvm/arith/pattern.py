@@ -61,6 +61,8 @@ def detect_clip_bound(expr, var_list):
         `concat([min_value[i], max_value[i]] for i, v in enumerate(var_list))`
         An empty list if the match failed.
     """
+    for var in var_list:
+        print(f'var:{var}')
     return _ffi_api.DetectClipBound(expr, var_list)
 
 

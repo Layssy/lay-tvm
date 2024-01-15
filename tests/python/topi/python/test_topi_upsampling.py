@@ -102,7 +102,8 @@ def verify_upsampling(
 
 
 def test_int_div_upsampling():
-    """Test whether upsampling op is tilable when scale_h and scale_w is integer.
+    """
+    Test whether upsampling op is tilable when scale_h and scale_w is integer.
 
     Compute_at cannot work correctly in the original floating-point multiplication.
     After using integer division,compute_at can work correctly and reduce the

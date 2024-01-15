@@ -82,17 +82,23 @@ class CopyIntrinInjector : public StmtMutator {
 
     const CastNode* cast = store->value.as<CastNode>();
     auto load = store->value.as<BufferLoadNode>();
+    // std::cout << "Current load: " <<load << std::endl;
     if (0 == loops.size()) {
       ICHECK(!has_cond);
     }
     // for now only support true condition matching
+    // std::cout << "Current load1: " <<has_cond << std::endl;
     if (has_cond) {
       load = sel_true_value.Eval().as<BufferLoadNode>();
     }
+
+    // std::cout << "Current has_cond: " <<has_cond << std::endl;
     // cast can be part of the pattern
+    // std::cout << "Current cast: " << *cast << std::endl;
     if (cast != nullptr) {
       load = cast->value.as<BufferLoadNode>();
     }
+    // std::cout << "Current load2: " <<load << std::endl;
     if (load == nullptr) {
       *error_info = "the 'BufferLoadNode' of body is a nullptr.";
       return false;

@@ -122,6 +122,13 @@ def build(*args, **kwargs):
     if not pass_ctx.config.get("tir.add_lower_pass"):
         with build_config():
             return tvm.build(*args, **kwargs)
+    # print(*args) 
+    # print('tvm/vta/python/vta/build_module.py-127:\n')
+    # for arg in args:
+    #     print(f'arg:{arg}')
+   
+    # for key, value in kwargs.items():
+    #     print(f"{key}: {value}")
     return tvm.build(*args, **kwargs)
 
 
@@ -129,6 +136,8 @@ def build(*args, **kwargs):
 tvm.ir.register_op_attr("tir.vta.coproc_sync", "TCallEffectKind", tvm.tir.CallEffectKind.Opaque)
 tvm.ir.register_op_attr("tir.vta.coproc_dep_push", "TCallEffectKind", tvm.tir.CallEffectKind.Opaque)
 tvm.ir.register_op_attr("tir.vta.coproc_dep_pop", "TCallEffectKind", tvm.tir.CallEffectKind.Opaque)
+tvm.ir.register_op_attr("tir.vta.coproc_read_barrier", "TCallEffectKind", tvm.tir.CallEffectKind.Opaque)
+tvm.ir.register_op_attr("tir.vta.coproc_write_barrier", "TCallEffectKind", tvm.tir.CallEffectKind.Opaque)
 
 tvm.ir.register_op_attr("tir.vta.uop_push", "TCallEffectKind", tvm.tir.CallEffectKind.Opaque)
 tvm.ir.register_op_attr("tir.vta.uop_push", "TGlobalSymbol", "VTAUopPush")

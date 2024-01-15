@@ -19,7 +19,7 @@
 import tvm
 from tvm import te
 from tvm.topi import utils
-
+import numpy as np
 from .environment import get_env
 
 
@@ -415,6 +415,7 @@ def InjectDMAIntrin():
             x_size = 1
             x_stride = buf.strides[ndim - base]
             next_base = base
+#            print(f'/home/lay/tvm/vta/python/vta/transform.py", line 442_elem_block:{elem_block}')
             if not utils.equal_const_int(idxm(x_stride, elem_block), 0):
                 raise RuntimeError(
                     "scope %s need to have block=%d, shape=%s, strides=%s"
@@ -438,6 +439,8 @@ def InjectDMAIntrin():
     def _get_2d_pattern(buf, elem_width, elem_bytes, dtype, scope, allow_fold):
         elem_block = elem_bytes * 8 // elem_width
         shape, strides = buf.shape, buf.strides
+        # print(f'/home/lay/tvm/vta/python/vta/transform.py-442: elem_block:{elem_block}\n shape: {shape}\n strides:{strides}\n src.scope:{buf.scope()}\n buf.elem_offset:{buf.elem_offset}')
+        # print(f'idxm(buf.elem_offset, elem_block):{idxm(buf.elem_offset, elem_block)}')
         if not utils.equal_const_int(idxm(buf.elem_offset, elem_block), 0):
             raise RuntimeError("scope %s need to have block=%d" % (scope, elem_block))
         if allow_fold:
@@ -522,6 +525,7 @@ def InjectDMAIntrin():
     def _inject_copy(src, dst, pad_before, pad_after, pad_value):
         # FIXME: pad_value is ignored...
         env = get_env()
+        # print(f'528-dst:{dst}  dst.scope(){dst.scope()} dst.dtype{dst.dtype}   src:{src} src.scope(){src.scope()}  src.dtype{src.dtype}')
         _ = pad_value
         if dst.scope() == "global":
             # Store
@@ -536,6 +540,7 @@ def InjectDMAIntrin():
             else:
                 raise RuntimeError("Do not support copy %s->dram" % (src.scope()))
             _check_compact(src)
+            # print(f'/home/lay/tvm/vta/python/vta/transform.py-543:\nsrc:{src} src_type:{type(src)}\n elem_width:{elem_width}   elem_width_type{type(elem_width)}\n elem_bytes:{elem_bytes} elem_bytes_type:{type(elem_bytes)}\n data_type:{data_type} data_type_type:{type(data_type)}\n dst.scope():{dst.scope()} dst.scope()_type:{type(dst.scope())}\n')
             x_size, y_size, x_stride, offset = _get_2d_pattern(
                 dst, elem_width, elem_bytes, data_type, src.scope(), allow_fold=True
             )
@@ -613,10 +618,12 @@ def InjectDMAIntrin():
                 allow_fold = True
 
             _check_compact(dst)
+            # print(f'/home/lay/tvm/vta/python/vta/transform.py-619:\nsrc:{src.scope()} src_type:{src.dtype}\n elem_width:{elem_width}   elem_width_type{type(elem_width)}\n elem_bytes:{elem_bytes} elem_bytes_type:{type(elem_bytes)}\n data_type:{data_type} data_type_type:{type(data_type)}\n dst.scope():{dst.scope()} dst.scope()_type:{type(dst.scope())}\n')
             x_size, y_size, x_stride, offset = _get_2d_pattern(
                 src, elem_width, elem_bytes, data_type, dst.scope(), allow_fold=allow_fold
             )
 
+            # print(f'data_type:{data_type}  data_type:{type(data_type)},,,,src_dtype:{src.dtype},,,,,,,src.dtype:{type(src.dtype)}')
             if data_type != src.dtype:
                 assert data_type == "int%d" % env.ACC_WIDTH and src.dtype == "int%d" % env.INP_WIDTH
                 mem_type = env.dev.MEM_ID_ACC_8BIT
@@ -646,7 +653,7 @@ def InjectDMAIntrin():
 
         else:
             raise RuntimeError("Do not support copy %s->%s" % (src.scope(), dst.scope()))
-
+    # print(f'fninsh---------------')
     return tvm.tir.transform.InjectCopyIntrin("dma_copy", _inject_copy)
 
 
@@ -900,7 +907,7 @@ def InjectALUIntrin():
         env = get_env()
         idxm = tvm.tir.indexmod
         analyzer = tvm.arith.Analyzer()
-
+        # print(f'/home/lay/tvm/vta/python/vta/transform.py-910:analyzer:{analyzer}')
         def _do_fold(stmt):
             def _flatten_loop(src_coeff, dst_coeff, extents):
                 src_coeff = list(src_coeff)
@@ -937,10 +944,25 @@ def InjectALUIntrin():
                 rev_extents.reverse()
 
                 return rev_src_coeff, rev_dst_coeff, rev_extents
-
+           
+            # print(f'/home/lay/tvm/vta/python/vta/transform.py-948:stmt:{type(stmt)}')
             if _match_pragma(stmt, "alu"):
                 # Get to the innermost loop body
+                # print(f'/home/lay/tvm/vta/python/vta/transform.py-951:loop_body:{type(stmt.body)}\n{stmt.body}')
                 loop_body = stmt.body
+                if isinstance(loop_body, tvm.tir.stmt.SeqStmt):
+                    # 遍历SeqStmt中的语句
+                    for stmt_ in loop_body:
+                        # 检查语句是否为循环语句
+                        if isinstance(stmt_, tvm.tir.stmt.For):
+                            # 获取循环类型
+                            loop_type = stmt_
+                    loop_body = loop_type
+                    # block = tvm.tir.analysis.stmt_seq_to_block(loop_body)
+                    # first_stmt = block.body[0]
+                    # print(f'test_first:{first_stmt}')
+                    pass
+
                 nest_size = 0
                 while isinstance(loop_body, tvm.tir.For):
                     loop_body = loop_body.body
@@ -950,6 +972,15 @@ def InjectALUIntrin():
                 dst_idx = loop_body.indices[0]
                 # Derive loop variables and extents
                 tmp_body = stmt.body
+                if isinstance(tmp_body, tvm.tir.stmt.SeqStmt):
+                    # 遍历SeqStmt中的语句
+                    for stmt_ in tmp_body:
+                        # 检查语句是否为循环语句
+                        if isinstance(stmt_, tvm.tir.stmt.For):
+                            # 获取循环类型
+                            loop_type = stmt_
+                            # print("循环类型:", type(loop_type))
+                    tmp_body = loop_type
                 indices = []
                 extents = []
                 for _ in range(nest_size):
@@ -957,6 +988,7 @@ def InjectALUIntrin():
                     extents.append(tmp_body.extent)
                     tmp_body = tmp_body.body
                 # Derive opcode
+                # print(f'/home/lay/tvm/vta/python/vta/transform.py-991:loop_body:{loop_body}\n{type(loop_body.value)}')
                 if isinstance(loop_body.value, tvm.tir.Add):
                     alu_opcode = env.dev.ALU_OPCODE_ADD
                     lhs = loop_body.value.a
@@ -973,19 +1005,26 @@ def InjectALUIntrin():
                     alu_opcode = env.dev.ALU_OPCODE_MIN
                     lhs = loop_body.value.a
                     rhs = loop_body.value.b
+                    # print(f'/home/lay/tvm/vta/python/vta/transform.py-1008:lhs:{type(lhs)},,,{lhs}')
+                    # print(f'/home/lay/tvm/vta/python/vta/transform.py-1009:rhs:{type(rhs)},,,{rhs}')
                 elif isinstance(loop_body.value, tvm.tir.Max):
                     alu_opcode = env.dev.ALU_OPCODE_MAX
                     lhs = loop_body.value.a
                     rhs = loop_body.value.b
+                    # print(f'/home/lay/tvm/vta/python/vta/transform.py-1014:lhs:{type(lhs)},,,{lhs}')
+                    # print(f'/home/lay/tvm/vta/python/vta/transform.py-1015:rhs:{type(rhs)},,,{rhs}')
                 elif isinstance(loop_body.value, tvm.tir.Call):
                     if loop_body.value.op.name == "tir.shift_left":
                         alu_opcode = env.dev.ALU_OPCODE_SHR
                         lhs = loop_body.value.args[0]
+                        # print(f'/home/lay/tvm/vta/python/vta/transform.py-1016:loop_body:{type(lhs)},,,{lhs}')
                         rhs = analyzer.simplify(-loop_body.value.args[1])
                     elif loop_body.value.op.name == "tir.shift_right":
                         alu_opcode = env.dev.ALU_OPCODE_SHR
                         lhs = loop_body.value.args[0]
                         rhs = loop_body.value.args[1]
+                        # print(f'/home/lay/tvm/vta/python/vta/transform.py-1022:lhs:{type(lhs)},,,{lhs}')
+                        # print(f'/home/lay/tvm/vta/python/vta/transform.py-1022:rhs:{type(rhs)},,,{rhs}')
                     else:
                         raise RuntimeError(
                             "Function call not recognized %s" % (loop_body.value.op.name)
@@ -994,6 +1033,22 @@ def InjectALUIntrin():
                     alu_opcode = env.dev.ALU_OPCODE_SHR
                     lhs = loop_body.value
                     rhs = tvm.tir.const(0, "int32")
+                elif isinstance(loop_body.value, tvm.tir.expr.IntImm):
+                    if loop_body.value >= -1 * (1 << 31) and loop_body.value < (1 << 31):  # change 15 to 31 
+                        alu_opcode = env.dev.ALU_OPCODE_MOV
+                        lhs = loop_body
+                        rhs = analyzer.simplify(loop_body.value)
+                        # rhs=loop_body.value
+                        # print("transformer.py,lhs",lhs,"rhs",rhs)
+                    else:
+                        # alu_opcode = env.dev.ALU_OPCODE_MOV
+                        # lhs = loop_body
+                        # rhs = analyzer.simplify(loop_body.value)
+                        assert False,\
+                               "ALU MOV imm must fit in int16, not: %d" % (loop_body.value)
+                    # alu_opcode = env.dev.ALU_OPCODE_MOV
+                    # lhs = loop_body
+                    # rhs = analyzer.simplify(loop_body.value)
                 else:
                     raise RuntimeError(
                         "Expression not recognized %s, %s, %s"
@@ -1006,6 +1061,10 @@ def InjectALUIntrin():
                 use_imm = False
                 imm_val = None
                 if isinstance(rhs, tvm.tir.IntImm):
+                    # print(f'lhs.buffer.data.same_as(dst_var):{lhs.buffer.data.same_as(dst_var)}')
+                    # print(f'lhs.buffer.data:{type(lhs.buffer.data)},,,,,{lhs.buffer.data.name}')
+                    # print(f'dst_var:{dst_var}     type_:{type(dst_var)} ,,,,,{dst_var.name}')
+                    # value_:{dst_var.value}
                     assert lhs.buffer.data.same_as(dst_var)
                     src_coeff = tvm.arith.detect_linear_equation(lhs.indices[0], indices)
                     use_imm = True
@@ -1079,7 +1138,6 @@ def InjectALUIntrin():
                 # Flatten the outer loops
                 if extents:
                     src_coeff, dst_coeff, extents = _flatten_loop(src_coeff, dst_coeff, extents)
-
                 # Insert ALU micro-ops
                 irb = tvm.tir.ir_builder.create()
                 for idx, extent in enumerate(extents):
@@ -1094,6 +1152,8 @@ def InjectALUIntrin():
                         )
                     )
                 use_imm = int(use_imm)
+                if alu_opcode==5 and (imm_val<-32768 or imm_val>32767):  # max_alu add the min value
+                    imm_val=32767*np.sign(imm_val)
                 irb.emit(
                     tvm.tir.call_intrin(
                         "int32",

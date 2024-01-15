@@ -33,7 +33,7 @@ from .types import RETURN_SWITCH, C_TO_PY_ARG_SWITCH, _wrap_arg_func, _device_to
 from .object import ObjectBase, PyNativeObject, _set_class_object
 from . import object as _object
 
-PackedFuncHandle = ctypes.c_void_p
+PackedFuncHandle = ctypes.c_void_p 
 ModuleHandle = ctypes.c_void_p
 ObjectHandle = ctypes.c_void_p
 TVMRetValueHandle = ctypes.c_void_p
@@ -222,9 +222,12 @@ class PackedFuncBase(object):
            The positional arguments to the function call.
         """
         temp_args = []
+        #该函数的目的是将参数转换为适用于 TVM 函数调用的形式。具体而言，它可能会将 Python 中的对象转换为 TVM 中的相应数据类型，并为 TVM 函数调用构建参数数组和类型码数组。
         values, tcodes, num_args = _make_tvm_args(args, temp_args)
         ret_val = TVMValue()
         ret_tcode = ctypes.c_int()
+        """__call__函数调用了C的TVMFuncCall这个API，把前面保存有c++ PackedFunc对象地址的handle以及相关的函数参数传了进去 主体在 src/runtime/c_runtime_api.cc
+        完成了把c++中的PackedFunc映射到了python中的PackedFunc，在python代码中只需要调用python中创建好的PackedFunc对象，就会通过上面分析的过程来一步步调到c++的代码中"""
         if (
             _LIB.TVMFuncCall(
                 self.handle,

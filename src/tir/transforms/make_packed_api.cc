@@ -213,8 +213,11 @@ PrimFunc MakePackedAPI(PrimFunc func) {
   if (!global_symbol.defined()) {
     return func;
   }
+  // std::cout << "PrimFunc func: " << func << std::endl;
+  // std::cout << "global_symbol: " << global_symbol << std::endl;
+  
   std::string name_hint = global_symbol.value();
-
+  // std::cout << "tvm/src/tir/transforme/make_packed_api.cc-217-name_hint: " << name_hint << std::endl;
   Target target = [&]() {
     auto opt = func->GetAttr<Target>(tvm::attr::kTarget);
     ICHECK(opt) << "MakePackedAPI required the function to be annotated with tvm::attr::kTarget ("
@@ -244,6 +247,7 @@ PrimFunc MakePackedAPI(PrimFunc func) {
   Var v_out_ret_value("out_ret_value", PointerType(PrimType(DataType::Void())));
   Var v_out_ret_tcode("out_ret_tcode", PointerType(PrimType(DataType::Int(32))));
   Var v_resource_handle("resource_handle", DataType::Handle());
+  // Var v_resize_handle("resource_handle", DataType::Handle());
   // The arguments of the function.
 
   // The device context
@@ -369,8 +373,14 @@ PrimFunc MakePackedAPI(PrimFunc func) {
                    body);
   func_ptr->body = body;
   func_ptr->params = args;
-
+  // std::cout << "func_ptr->body" << func_ptr->body << std::endl;
+  // std::cout << "func_ptr->params " << func_ptr->params << std::endl;
   Array<Var> undefined = UndefinedVars(func_ptr->body, func_ptr->params);
+  // 遍历变量列表
+  // for (Var var : undefined) {
+  //     // 对每个变量执行所需的操作
+  //     std::cout << "未定义的变量:var " << var << std::endl;
+  // }
   ICHECK_EQ(undefined.size(), 0) << "In PrimFunc " << name_hint << " variables " << undefined
                                  << " are used, but are not passed in as API arguments";
 
@@ -400,14 +410,19 @@ Pass MakePackedAPI() {
     IRModule updates;
 
     for (const auto& [gvar, base_func] : mptr->functions) {
+      // std::cout << "gvar: " << gvar << std::endl;
       if (auto opt = base_func.as<PrimFunc>()) {
+        
         auto func = opt.value();
+
+        // std::cout << "func1: " << func << std::endl;
         auto orig_func = func;
 
         if (auto body = SubroutineCallRewriter::Apply(packed_func_methods, func->body)) {
           func.CopyOnWrite()->body = body.value();
+          // std::cout << "func2: " << func << std::endl;
         }
-
+        //  std::cout << "func before Make: " << std::move(func) << std::endl;
         func = MakePackedAPI(std::move(func));
 
         if (!func.same_as(orig_func)) {

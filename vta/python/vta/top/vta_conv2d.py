@@ -30,6 +30,7 @@ from vta.environment import get_env
 @autotvm.register_topi_compute("conv2d_packed.vta")
 def conv2d_packed(cfg, data, kernel, strides, padding, dilation, layout, out_dtype):
     """Packed conv2d function."""
+    print(f"layout_:{layout}")
     if not is_packed_layout(layout):
         raise topi.InvalidShapeError()
     assert dilation == (1, 1)
@@ -70,7 +71,7 @@ def conv2d_packed(cfg, data, kernel, strides, padding, dilation, layout, out_dty
         * ishape[1]
         * ishape[-1]
     )
-
+    print(f'res_dtype:{res.dtype}')
     return res
 
 
@@ -103,7 +104,9 @@ def schedule_conv2d_packed(cfg, outs):
 
     _traverse(output.op)
     assert len(conv2d_res) == 1
+
     conv2d_stage = conv2d_res[0].output(0)
+
     s = te.create_schedule(output.op)
 
     ##### space definition begin #####
@@ -117,7 +120,6 @@ def schedule_conv2d_packed(cfg, outs):
     cfg.define_knob("oc_nthread", [1, 2])
     cfg.define_knob("h_nthread", [1, 2])
     ###### space definition end ######
-
     data, kernel = conv2d_stage.op.input_tensors
     if isinstance(data.op, tvm.te.ComputeOp) and "pad" in data.op.tag:
         temp = data.op.input_tensors[0]
@@ -168,16 +170,16 @@ def schedule_conv2d_packed(cfg, outs):
         s[tensor].pragma(s[tensor].op.axis[0], env.dma_copy)
 
     # virtual threading along output channel axes
-    if cfg["oc_nthread"].val > 1:
-        _, v_t = s[output].split(x_co0, factor=cfg["oc_nthread"].val)
-        s[output].reorder(v_t, x_bo)
-        s[output].bind(v_t, te.thread_axis("cthread"))
+    # if cfg["oc_nthread"].val > 1:
+    #     _, v_t = s[output].split(x_co0, factor=cfg["oc_nthread"].val)
+    #     s[output].reorder(v_t, x_bo)
+    #     s[output].bind(v_t, te.thread_axis("cthread"))
 
     # virtual threading along spatial rows
-    if cfg["h_nthread"].val > 1:
-        _, v_t = s[output].split(x_i0, factor=cfg["h_nthread"].val)
-        s[output].reorder(v_t, x_bo)
-        s[output].bind(v_t, te.thread_axis("cthread"))
+    # if cfg["h_nthread"].val > 1:
+    #     _, v_t = s[output].split(x_i0, factor=cfg["h_nthread"].val)
+    #     s[output].reorder(v_t, x_bo)
+    #     s[output].bind(v_t, te.thread_axis("cthread"))
 
     x_bo, x_co, x_i, x_j, x_bi, x_ci = s[conv2d_stage].op.axis
     k_o, d_i, d_j, k_i = s[conv2d_stage].op.reduce_axis
@@ -187,9 +189,10 @@ def schedule_conv2d_packed(cfg, outs):
     s[cdata].compute_at(s[conv2d_stage], k_o)
     s[ckernel].compute_at(s[conv2d_stage], k_o)
 
-    # Use VTA instructions
+    # # Use VTA instructions
     s[cdata].pragma(s[cdata].op.axis[0], env.dma_copy)
     s[ckernel].pragma(s[ckernel].op.axis[0], env.dma_copy)
+    # print(f'x_bi:{type(x_bi)}')
     s[conv2d_stage].tensorize(x_bi, env.gemm)
     s[output].pragma(x_co1, env.dma_copy)
 

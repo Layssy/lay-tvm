@@ -214,6 +214,9 @@ class TensorIntrinMatcher final : public StmtExprMutator {
 
     // input remap.
     Array<Tensor> inputs = self->InputTensors();
+    // for (const Tensor& input : inputs) {
+    //     std::cout << "tvm_src_te_opration_tensorize_218_inputs" << input << std::endl;
+    // }
     ICHECK_EQ(inputs.size(), intrin->inputs.size());
     for (size_t i = 0; i < inputs.size(); ++i) {
       InputEntry e;

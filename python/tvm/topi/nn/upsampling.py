@@ -115,7 +115,8 @@ def upsampling3d(
     coordinate_transformation_mode="half_pixel",
     output_shape=None,
 ):
-    """Perform upsampling on the data.
+    """
+       Perform upsampling on the data.
        Nearest neighbor and bilinear upsampling are supported.
 
     Parameters

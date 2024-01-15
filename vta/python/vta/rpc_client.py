@@ -37,7 +37,8 @@ def reconfig_runtime(remote):
 
 
 def program_fpga(remote, bitstream=None):
-    """Upload and program bistream
+    """
+    Upload and program bistream
 
     Parameters
     ----------

@@ -156,8 +156,8 @@ def run_conv2d(env, remote, wl, target, check_correctness=True, print_ir=False, 
         res = topi.cast(res, env.out_dtype)
         # Derive base schedule
         s = conv2d_fschedule([res])
-        if print_ir:
-            print(vta.lower(s, [data, kernel, bias, res], simple_mode=True))
+        # if print_ir:
+        #     print(vta.lower(s, [data, kernel, bias, res], simple_mode=True))
 
     # Derive number of ops
     fout_height = (wl.height + 2 * wl.hpad - wl.hkernel) // wl.hstride + 1
@@ -217,13 +217,14 @@ def run_conv2d(env, remote, wl, target, check_correctness=True, print_ir=False, 
 
     # Build
     if "vta" in target.keys:
-        with vta.build_config(disabled_pass={"tir.CommonSubexprElimTIR"}):
+        with vta.build_config(debug_flag=False, disabled_pass={"tir.CommonSubexprElimTIR"}):
             mod = vta.build(
                 s,
                 [data, kernel, bias, res],
                 target=tvm.target.Target(target, host=env.target_host),
                 name="conv2d",
             )
+            # vta.lower(s, [data, kernel, bias, res]).show()
     else:
         mod = tvm.build(
             s,
@@ -285,6 +286,8 @@ def run_conv2d(env, remote, wl, target, check_correctness=True, print_ir=False, 
 
     gops = (num_ops / cost.mean) / float(10**9)
     status = "PASSED" if correct else "FAILED"
+    stats = simulator.stats()
+    print(f'stats:{stats}')
     if "arm_cpu" in target.keys:
         device = "CPU"
     elif "vta" in target.keys:
@@ -297,8 +300,10 @@ def run_conv2d(env, remote, wl, target, check_correctness=True, print_ir=False, 
 @pytest.mark.parametrize("device", ["vta", "arm_cpu"])
 def test_conv2d(device):
     def _run(env, remote):
+        # print(f'device:{device}')
         if device == "vta":
             target = env.target
+            # print(f'vta_target:{env.target}\n')
             if env.TARGET not in ["sim", "tsim", "intelfocl"]:
                 assert tvm.runtime.enabled("rpc")
                 program_fpga(remote, bitstream=None)
@@ -307,12 +312,13 @@ def test_conv2d(device):
             target = env.target_vta_cpu
         with autotvm.tophub.context(target):  # load pre-tuned schedule parameters
             for _, wl in resnet_wkls:
-                print(wl)
+                # print(wl)
                 run_conv2d(env, remote, wl, target)
+                break
 
     vta.testing.run(_run)
 
 
 if __name__ == "__main__":
-    test_conv2d(device="arm_cpu")
+    # test_conv2d(device="arm_cpu")
     test_conv2d(device="vta")

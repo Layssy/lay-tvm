@@ -57,7 +57,9 @@ def _return_object(x):
     handle = x.v_handle
     if not isinstance(handle, ObjectHandle):
         handle = ObjectHandle(handle)
+    #声明为一个无符号整数类型的变量。
     tindex = ctypes.c_uint()
+    """Check the return value of C API cal"""
     check_call(_LIB.TVMObjectGetTypeIndex(handle, ctypes.byref(tindex)))
     cls = OBJECT_TYPE.get(tindex.value, _CLASS_OBJECT)
     if issubclass(cls, PyNativeObject):

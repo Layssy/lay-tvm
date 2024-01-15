@@ -211,7 +211,7 @@ def run_group_conv2d(env, remote, wl, target, check_correctness=True, print_ir=F
 
     # Build
     if "vta" in target.keys:
-        with vta.build_config(disabled_pass={"tir.CommonSubexprElimTIR"}):
+        with vta.build_config(debug_flag=True, disabled_pass={"tir.CommonSubexprElimTIR"}):
             mod = vta.build(
                 s,
                 [data, kernel, bias, res],

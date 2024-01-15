@@ -477,7 +477,7 @@ def raise_last_ffi_error():
     # PDB post-mortem.  Therefore, we must make sure to remove the
     # underlying PyObject* from the C++ side after we retrieve it.
     _LIB.TVMDropLastPythonError()
-
+    # print(f'/home/lay/tvm/python/tvm/_ffi/base.py-480:\n{py_err}')
     raise py_err
 
 

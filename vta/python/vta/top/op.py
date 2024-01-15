@@ -27,11 +27,13 @@ from tvm.relay.op import op as reg
 from tvm.relay.op import strategy as _strategy
 from tvm.relay.op.op import OpPattern, OpStrategy
 
-from .utils import is_packed_layout
+# from .utils import is_packer_layout·
 from .vta_conv2d import conv2d_packed, schedule_conv2d_packed
 from .vta_conv2d_transpose import conv2d_transpose_packed, schedule_conv2d_transpose_packed
 from .vta_group_conv2d import group_conv2d_packed, schedule_group_conv2d_packed
 from .vta_dense import dense_packed, schedule_dense_packed
+from .vta_pooling import pooling_packed, schedule_pooling_packed
+from .vta_upsample import upsampling, schedule_upsampling_packed
 from ..environment import get_env
 
 ENV = get_env()
@@ -85,6 +87,7 @@ def schedule_alu_packed(cfg, outs):
 
     outs = [outs] if isinstance(outs, te.tensor.Tensor) else outs
     output = outs[0]
+    # print(f'output.op:{output.op}')
     s = te.create_schedule([x.op for x in outs])
     te.schedule.AutoInlineInjective(s)
 
@@ -197,6 +200,25 @@ if ENV.TARGET in ["sim", "intelfocl"]:
     reg.get("multiply").get_attr("FTVMStrategy").register(multiply_strategy_vta, "vta")
 
 
+
+def wrap_compute_upsample(topi_compute):
+    pass
+
+def upsample_strategy_vta(attrs, inputs, out_type, target):
+    strategy = OpStrategy()
+    strategy.add_implementation(
+        _strategy.wrap_topi_compute(upsampling),
+        _strategy.wrap_topi_schedule(schedule_upsampling_packed),
+        name="upsampling_packed.vta",
+    )
+    return strategy
+
+reg.get("nn.upsampling").get_attr("FTVMStrategy").register(upsample_strategy_vta, "vta")
+
+
+
+
+
 @_strategy.conv2d_strategy.register("vta")
 def conv2d_strategy_vta(attrs, inputs, out_type, target):
     """conv2d vta strategy"""
@@ -265,4 +287,61 @@ def dense_strategy_vta(attrs, inputs, out_type, target):
         return strategy
     # If it's not packed, run on ARM CPU
     arm_tgt = tvm.target.arm_cpu(target.model)
-    return _strategy.x86.dense_strategy_cpu(attrs, inputs, out_type, arm_tgt)
+    return _strategy.arm_cpu.dense_strategy_cpu(attrs, inputs, out_type, arm_tgt)
+
+def wrap_compute_max_pool2d(topi_compute):
+    return _compute_max_pool2d
+
+def wrap_compute_global_avg_pool2d(topi_compute):
+    """Wrap global_avg_pool2d topi compute"""
+    def _compute_global_avg_pool2d(attrs, inputs, out_type):
+        shape = inputs[0].shape # height and width remain the same regardless of packing
+        assert attrs.layout == "NCHW"
+        if len(shape) == 6:
+            env = get_env()
+            layout = "NCHW%dn%dc" % (env.BATCH, env.BLOCK_OUT)
+            args = [inputs[0], [shape[2], shape[3]], [1, 1], [0, 0, 0, 0], 'avg',
+                    False, layout, True, [0, 2047]] # input range assumptions
+            return [topi_compute(*args)]
+        args = [inputs[0], [shape[2], shape[3]], [1, 1], [0, 0, 0, 0], 'avg',
+                False, attrs.layout, True] # no input range assumptions
+        return [topi_compute(*args)]
+    return _compute_global_avg_pool2d
+
+def pool_strategy_vta(attrs, inputs, out_type, target):
+    """pool_strategy_vta"""
+    strategy = OpStrategy()
+    shape = inputs[0].shape
+
+    if len(shape) == 6: # VTA hardware
+        env = get_env()
+        assert inputs[0].dtype == "int32", "VTA pooling only supports 32-bit input data"
+        assert env.LOG_ACC_WIDTH == 5, "VTA pooling only supports 32-bit accumulator"
+        if isinstance(attrs, tvm.relay.op.op_attrs.GlobalPool2DAttrs):
+            strategy.add_implementation(
+                wrap_compute_global_avg_pool2d(pooling_packed),
+                _strategy.wrap_topi_schedule(schedule_pooling_packed),
+                name="packed_global_avg_pool2d_strategy.vta")
+        elif isinstance(attrs, tvm.relay.op.op_attrs.MaxPool2DAttrs):
+            strategy.add_implementation(
+                wrap_compute_max_pool2d(pooling_packed),
+                _strategy.wrap_topi_schedule(schedule_pooling_packed),
+                name="packed_max_pool2d_strategy.vta")
+    else: # unpacked, so ARM cpu
+        if isinstance(attrs, tvm.relay.op.op_attrs.GlobalPool2DAttrs):
+            strategy.add_implementation(
+                wrap_compute_global_avg_pool2d(topi.nn.pool), 
+                _strategy.schedule_pool,
+                name="unpacked_global_avg_pool2d_strategy.vta")
+        elif isinstance(attrs, tvm.relay.op.op_attrs.MaxPool2DAttrs):
+            strategy.add_implementation(
+                wrap_compute_max_pool2d(topi.nn.pool),
+                _strategy.schedule_pool,
+                name="unpacked_max_pool2d_strategy.vta")
+    return strategy
+
+reg.get("nn.global_avg_pool2d").get_attr("FTVMStrategy").register(pool_strategy_vta, "vta")
+reg.get("nn.max_pool2d").get_attr("FTVMStrategy").register(pool_strategy_vta, "vta")
+
+
+

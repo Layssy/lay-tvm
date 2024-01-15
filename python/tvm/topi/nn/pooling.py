@@ -68,7 +68,8 @@ def pool_grad(
     layout="NCHW",
     count_include_pad=True,
 ):
-    """Gradient of pooling on height and width dimension of data.
+    """
+       Gradient of pooling on height and width dimension of data.
        It decides the height and width dimension according to the layout string,
        in which 'W' and 'H' means width and height respectively.
        Width and height dimension cannot be split.

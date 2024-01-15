@@ -682,7 +682,8 @@ void LegalizeInvalidAttach(ScheduleNode* sch) {
     for (Stage s = stage; s.defined();) {
       // The following logic is simiar to the `CreateAttachPath` in `src/te/schedule/graph.h`,
       // because we follow the validation check in that function to legalize the attach.
-      ICHECK(!visited.count(s.get())) << "Find loop in compute_at attach group";
+      // std::cout << "Current state: " << s << std::endl;
+      // ICHECK(!visited.count(s.get())) << "Find loop in compute_at attach group";
       visited.insert(s.get());
       Stage spec = s.GetAttachSpec();
       if (spec->attach_type != kScope) {

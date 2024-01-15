@@ -31,7 +31,6 @@
 #include <unordered_set>
 
 namespace tvm {
-
 IRModule::IRModule(tvm::Map<GlobalVar, BaseFunc> functions,
                    tvm::Map<GlobalTypeVar, TypeData> type_definitions,
                    std::unordered_set<String> import_set, SourceMap source_map, DictAttrs attrs) {

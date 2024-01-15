@@ -161,18 +161,26 @@ def equal_const_int(expr, value):
     equal : bool
         Whether they equals.
     """
+    # print(f'tvm/python/tvm/topi/utils.py-164：type:{type(expr)}')
     if isinstance(expr, Integral):
+        # print(f'tvm/python/tvm/topi/utils.py-166')
         return expr == value
     if not isinstance(expr, tvm.tir.IntImm):
+        # print(f'tvm/python/tvm/topi/utils.py-169')
+        # print(f'bfore ana expr:{expr}, type:{type(expr)}')
         ana = tvm.arith.Analyzer()
         expr = ana.simplify(expr)
+        # tvm.tir.IntImm(0)
+        # print(f'after ana expr:{expr}')
     if not isinstance(expr, tvm.tir.IntImm):
+        # print(f'tvm/python/tvm/topi/utils.py-173')
         return False
     return expr.value == value
 
 
 def get_const_tuple(in_tuple):
-    """Verifies input tuple is IntImm or Var, returns tuple of int or Var.
+    """
+    Verifies input tuple is IntImm or Var, returns tuple of int or Var.
 
     Parameters
     ----------

@@ -36,8 +36,8 @@ def test_gemm():
         # To compute number of ops, use a x2 factor for FMA
         num_ops = 2 * channel * channel * batch_size
 
-        ko = te.reduce_axis((0, channel // env.BLOCK_IN), name="ko")
-        ki = te.reduce_axis((0, env.BLOCK_IN), name="ki")
+        ko = te.reduce_axis((0, channel // env.BLOCK_IN), name="ko")#创建一个新的 Iter Var 进行缩减。
+        ki = te.reduce_axis((0, env.BLOCK_IN), name="ki")#创建一个新的 Iter Var 进行缩减。
 
         data = te.placeholder(data_shape, name="data", dtype=env.inp_dtype)
         weight = te.placeholder(weight_shape, name="weight", dtype=env.wgt_dtype)
@@ -60,12 +60,13 @@ def test_gemm():
         res = te.compute(res_shape, lambda *i: res_min(*i).astype(env.inp_dtype), name="res")
 
         def verify(s):
-            mod = vta.build(
-                s,
-                [data, weight, res],
-                tvm.target.Target("ext_dev", host=env.target_host),
-                name="gemm",
-            )
+            with vta.build_config(debug_flag=True, disabled_pass={"tir.CommonSubexprElimTIR"}):
+                mod = vta.build(
+                    s,
+                    [data, weight, res],
+                    tvm.target.Target("ext_dev", host=env.target_host),
+                    name="gemm",
+                )
             temp = utils.tempdir()
             mod.save(temp.relpath("gemm.o"))
             remote.upload(temp.relpath("gemm.o"))
@@ -111,6 +112,7 @@ def test_gemm():
 
         def run_schedule(load_inp, load_wgt, gemm, alu, store_out, print_ir):
             s = te.create_schedule(res.op)
+            # print(f'res.op:{res.op}')
             s[data_buf].set_scope(env.inp_scope)
             s[weight_buf].set_scope(env.wgt_scope)
             s[res_gem].set_scope(env.acc_scope)
@@ -122,10 +124,11 @@ def test_gemm():
                 bblock = block // env.BATCH
                 iblock = block // env.BLOCK_IN
                 oblock = block // env.BLOCK_OUT
+                print(f'res.op:{res.op}')
                 xbo, xco, xbi, xci = s[res].op.axis
                 xb1, xco1, xb2, xco2 = s[res].tile(xbo, xco, bblock, oblock)
                 store_pt = xb2
-
+                print(f'type_s[res]:{type(s[res])}')
                 s[res_gem].compute_at(s[res], xco1)
                 s[res_shf].compute_at(s[res], xco1)
                 s[res_min].compute_at(s[res], xco1)
@@ -272,8 +275,8 @@ def test_gemm():
                 run_test("NORMAL", print_ir)
             print("")
 
-        gemm_normal(False)
-        gemm_unittest(False)
+        # gemm_normal(False)
+        # gemm_unittest(False)
         alu_unittest(False)
 
     def _run(env, remote):

@@ -38,7 +38,7 @@ def is_packed_layout(layout):
 @autotvm.register_topi_compute("dense_packed.vta")
 def dense_packed(cfg, data, weight, bias=None, out_dtype=None):
     """Dense function declaration."""
-
+    
     # Make sure that the dense operator is packed
     if len(data.shape) != 4 or len(weight.shape) != 4:
         raise topi.InvalidShapeError()
@@ -46,6 +46,7 @@ def dense_packed(cfg, data, weight, bias=None, out_dtype=None):
     # Derive shapes
     ishape = topi.utils.get_const_tuple(data.shape)
     wshape = topi.utils.get_const_tuple(weight.shape)
+    # print(f'ishape:{ishape}\nwshape:{wshape}')
     oshape = (data.shape[0], weight.shape[0], data.shape[2], weight.shape[2])
 
     # Reduction axes (input channel)
@@ -65,7 +66,7 @@ def dense_packed(cfg, data, weight, bias=None, out_dtype=None):
     )
 
     cfg.add_flop(2 * np.prod(topi.utils.get_const_tuple(oshape)) * ishape[1] * ishape[3])
-
+    # print(f'compute_res_dtype:{res.op}')
     return res
 
 
@@ -75,6 +76,7 @@ def schedule_dense_packed(cfg, outs):
 
     assert len(outs) == 1
     output = outs[0]
+    # print(f'dense_output:{output.op}')
     const_ops = []
     ewise_inputs = []
     ewise_ops = []
@@ -87,6 +89,7 @@ def schedule_dense_packed(cfg, outs):
                 if not op.axis:
                     const_ops.append(op)
                 else:
+                    # print(f'traverse_op:{op}')
                     ewise_ops.append(op)
             for tensor in op.input_tensors:
                 if isinstance(tensor.op, tvm.te.PlaceholderOp):
@@ -95,13 +98,16 @@ def schedule_dense_packed(cfg, outs):
                     _traverse(tensor.op)
         else:
             assert op.tag == "dense_pack"
+            # print("aaaa")
+            # print(f'op{op}\n,op.tag:{op.tag}')
             dense_res.append(op)
 
     _traverse(output.op)
     assert len(dense_res) == 1
+    # print(f'len_ewise_ops:{len(ewise_ops)}')
     dense_stage = dense_res[0].output(0)
     s = te.create_schedule(output.op)
-
+    # print(f'dense_stage:{dense_stage}\ndense_stage_type:{type(dense_stage)}')
     ##### space definition begin #####
     b, c_o, _, _ = s[dense_stage].op.axis
     c_i, _ = s[dense_stage].op.reduce_axis
@@ -112,24 +118,37 @@ def schedule_dense_packed(cfg, outs):
     ###### space definition end ######
 
     data, weight = dense_stage.op.input_tensors
+    
+    # print(f'compute_data:{data.dtype}   ,,{data}')
+    # print(f'compute_weight:{weight.dtype}')
+    # print(f'data:{type(data)}\ndense_stage.op:{dense_stage.op}')
 
     env = get_env()
 
     cdata = s.cache_read(data, env.inp_scope, [dense_stage])
+    # print(f'compute_cdata:{cdata}\n compute_cdata_dtype{cdata.dtype}')
+    # print(f'dense_stage:{dense_stage}\n dense_stage_type{type(cdata)}')
     cweight = s.cache_read(weight, env.wgt_scope, [dense_stage])
+    # print(f'compute_cweight:{cweight.dtype}')
     s[dense_stage].set_scope(env.acc_scope)
+    # print(f's[dense_stage]:{s[dense_stage]}')
 
     # cache read input
     cache_read_ewise = []
     for consumer, tensor in ewise_inputs:
+        # print(f'consumer:{consumer}\nconsumer_type:{type(consumer)}')
         cache_read_ewise.append(s.cache_read(tensor, env.acc_scope, [consumer]))
 
     # set ewise scope
     for op in ewise_ops:
+        # print(f'op:{op}\nop_type:{type(op)}')
+        # print(f'testttt')
+        # print(f'schedule_op:{op}')
         s[op].set_scope(env.acc_scope)
         s[op].pragma(s[op].op.axis[0], env.alu)
 
     for op in const_ops:
+        # print(f'const_ops:{op}\n const_ops:{type(op)}')
         s[op].compute_inline()
 
     # apply tiling for SRAM reuse
@@ -139,9 +158,12 @@ def schedule_dense_packed(cfg, outs):
     s[output].reorder(x_bo, x_co, x_bi, x_ci)
     store_pt = x_co
 
-    # set all compute scopes
+    # # set all compute scopes
     s[dense_stage].compute_at(s[output], store_pt)
+    # # print(f's[dense_stage]1:{s[dense_stage]}')
     for op in ewise_ops:
+        # print(f'ewise_ops.op:{s[op].op}\newise_ops.op.tensor:{s[op].op.input_tensors}')
+        # print(f'ewise_ops.op.tensor.dtype:{s[op].op.input_tensors[0].dtype}')
         s[op].compute_at(s[output], store_pt)
 
     for tensor in cache_read_ewise:
@@ -159,13 +181,29 @@ def schedule_dense_packed(cfg, outs):
     s[dense_stage].reorder(x_bo, k_o, x_co)
 
     k_o, _ = cfg["tile_ci"].apply(s, dense_stage, k_o)
+    # print(f'cdata:{cdata}\nc_data_type:{type(cdata)}')
     s[cdata].compute_at(s[dense_stage], k_o)
     s[cweight].compute_at(s[dense_stage], k_o)
 
     # Use VTA instructions
     s[cdata].pragma(s[cdata].op.axis[0], env.dma_copy)
     s[cweight].pragma(s[cweight].op.axis[0], env.dma_copy)
+        
+    # # print(f'compute_cdata:{cdata.dtype}')
+    # # print(f'compute_cdata:{cdata.dtype}')
     s[dense_stage].tensorize(x_bi, env.gemm)
+    
+    # # print(f's[dense_stage]2:{s[dense_stage]}')
+    print(f's[cdata].op:{s[cdata].op}\ns[cdata].op.input_tensors:{s[cdata].op.input_tensors}')
+    print(f's[cdata].op.tensor.dtype:{s[cdata].op.input_tensors[0].dtype}')
+    print()
+    print(f'dense_stage.op:{dense_stage.op}\ndense_stage.op.input_tensors:{dense_stage.op.input_tensors}')
+    print(f'dense_stage.op.tensor.dtype:{dense_stage.op.input_tensors[0].dtype}')
+    print()
+    # # print(f's[output].op:{s[output].op}\ns[output].op.tensor:{s[output].op.input_tensors}')
+    # # print(f's[output].op.tensor.dtype:{s[output].op.input_tensors[0].dtype}')
     s[output].pragma(x_ci, env.dma_copy)
+    
+    
 
     return s

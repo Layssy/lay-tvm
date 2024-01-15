@@ -82,7 +82,9 @@ def run_gemm(
         kernel_shape = w_shape
         fcompute = topi.x86.dense_nopack
         fschedule = topi.x86.schedule_dense_nopack
+    # print(f'test_data_shape:{data_shape}\n test_kernel_shape:{kernel_shape}')
     data = te.placeholder(data_shape, name="data", dtype=env.inp_dtype)
+    # print(f'data.scope:{data.scope}')
     kernel = te.placeholder(kernel_shape, name="kernel", dtype=env.wgt_dtype)
 
     # Define base computation schedule
@@ -90,11 +92,12 @@ def run_gemm(
         res = fcompute(data, kernel, None, env.acc_dtype)
         res = topi.right_shift(res, 8)
         res = my_clip(res, 0, (1 << env.OUT_WIDTH - 1) - 1)
-        res = topi.cast(res, env.out_dtype)
+        res = topi.cast(res, env.out_dtype) 
+        # print(f'test_res:{res.op}')
         # Derive base schedule
         s = fschedule([res])
-        if print_ir:
-            print(vta.lower(s, [data, kernel, res], simple_mode=True))
+        # if print_ir:
+        #     print(vta.lower(s, [data, kernel, res], simple_mode=True))
 
     # Derive number of ops
     num_ops = 2 * batch_size * in_feat * out_feat
@@ -114,6 +117,7 @@ def run_gemm(
 
     # Data in original format
     data_np, kernel_np, res_ref = get_ref_data()
+    # print(f'data_np:{data_np}')
     if data_pack:
         data_np = data_np.reshape(
             batch_size // env.BATCH, env.BATCH, in_feat // env.BLOCK_IN, env.BLOCK_IN
@@ -121,7 +125,7 @@ def run_gemm(
         kernel_np = kernel_np.reshape(
             out_feat // env.BLOCK_OUT, env.BLOCK_OUT, in_feat // env.BLOCK_IN, env.BLOCK_IN
         ).transpose((0, 2, 1, 3))
-
+    # print(f'data_np:{data_np}')
     # Build
     if "vta" in target.keys:
         mod = vta.build(
@@ -130,6 +134,7 @@ def run_gemm(
             target=tvm.target.Target(target, host=env.target_host),
             name="dense",
         )
+        vta.lower(s, [data, kernel, res], simple_mode=True).show()
     else:
         mod = tvm.build(
             s,
@@ -145,6 +150,7 @@ def run_gemm(
 
     res_np = np.zeros(topi.utils.get_const_tuple(res.shape)).astype(res.dtype)
     data_arr = tvm.nd.array(data_np, dev)
+    # print(f'data_arr:{data_arr}')
     kernel_arr = tvm.nd.array(kernel_np, dev)
     res_arr = tvm.nd.array(res_np, dev)
     time_f = f.time_evaluator("dense", dev, number=samples)

@@ -383,6 +383,8 @@ IRModule LowerSchedule(te::Schedule sch, const Array<ObjectRef>& args, const std
   IRModule mod = ScheduleToModule(std::move(sch), args, name, binds, global_var_supply);
   // Get the legacy TE pass list
   Array<transform::Pass> pass_list = CreatePassList(simple_mode);
+  // std::cout << "Current mod: " <<mod << std::endl;
+  
   return LowerWithPassList(mod, pass_list);
 }
 
@@ -524,6 +526,14 @@ runtime::Module TIRToRuntime(const Map<Target, IRModule>& inputs_arg,
 
 TVM_REGISTER_GLOBAL("driver.tir_to_runtime")
     .set_body_typed([](const Map<Target, IRModule>& inputs_arg, Target host_target) {
+      // std::cout << "host_target: " << host_target<< std::endl;
+       for (auto kv : inputs_arg) {
+          tvm::Target target = kv.first;
+          tvm::IRModule module = kv.second;
+          // 打印键值对信息
+          // std::cout << "Target:Target: " << target << std::endl;
+          // std::cout << "IRModule: " << module << std::endl;
+    }
       return TIRToRuntime(inputs_arg, host_target);
     });
 
